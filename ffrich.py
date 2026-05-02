@@ -2,7 +2,7 @@
 # coding: utf-8
 
 # Copyright (c) 2017-2021 Martin Larralde <martin.larralde@ens-paris-saclay.fr>
-# Copyright (c) 2022 Nathan Banks
+# Copyright (c) 2022-2026 Nathan Banks
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -25,9 +25,6 @@
 """A progress bar for `ffmpeg` using `rich`.
 """
 
-from __future__ import unicode_literals
-from __future__ import print_function
-
 import locale
 import os
 import re
@@ -35,13 +32,6 @@ import signal
 import sys
 import subprocess
 from typing import Optional
-
-if sys.version_info < (3, 0):
-    import Queue as queue
-    input = raw_input
-else:
-    import queue
-    unicode = str
 
 import rich.console
 import rich.progress
@@ -71,10 +61,10 @@ class FramesPerSecondColumn(rich.progress.ProgressColumn):
 
 class ProgressNotifier(object):
 
-    _DURATION_RX = re.compile(b"Duration: (\d{2}):(\d{2}):(\d{2})\.\d{2}")
-    _PROGRESS_RX = re.compile(b"time=(\d{2}):(\d{2}):(\d{2})\.\d{2}")
-    _DEST_RX = re.compile(b"to '(.*)':")
-    _FPS_RX = re.compile(b"(\d{2}\.\d{2}|\d{2}) fps")
+    _DURATION_RX = re.compile(rb"Duration: (\d{2}):(\d{2}):(\d{2})\.\d{2}")
+    _PROGRESS_RX = re.compile(rb"time=(\d{2}):(\d{2}):(\d{2})\.\d{2}")
+    _DEST_RX = re.compile(rb"to '(.*)':")
+    _FPS_RX = re.compile(rb"(\d{2}\.\d{2}|\d{2}) fps")
 
     @staticmethod
     def _seconds(hours, minutes, seconds):
@@ -101,7 +91,7 @@ class ProgressNotifier(object):
         self.console = console
 
     def __call__(self, char, stdin = None):
-        if isinstance(char, unicode):
+        if isinstance(char, str):
             char = char.encode('ascii')
         if char in b"\r\n":
             line = self.newline()
