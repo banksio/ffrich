@@ -110,29 +110,29 @@ class ProgressNotifier(object):
         self.encoding = encoding or locale.getpreferredencoding() or 'UTF-8'
         self.console = console or rich.console.Console(stderr=True)
 
-    def __call__(self, char, stdin=None):
-        """Process ffmpeg output one character at a time."""
-        if isinstance(char, str):
-            char = char.encode('ascii')
-        if char in b"\r\n":
-            line = self.newline()
-            if self.duration is None:
-                self.duration = self.get_duration(line)
-            if self.dest is None:
-                self.dest = self.get_dest(line)
-            if self.fps is None:
-                self.fps = self.get_fps(line)
-            if not self.progress(line):
-                self.print_log(line)
-        else:
-            self.line_acc.extend(char)
-            if self.line_acc[-6:] == bytearray(b"[y/N] "):
-                line = self.line_acc.decode(self.encoding, errors="replace")
-                self.console.print(rich.text.Text.from_ansi(line), end="")
-                self.console.file.flush()
-                if stdin:
-                    stdin.put(input() + "\n")
-                self.newline()
+    def __call__(self, chunk: bytes, stdin=None):
+        """Process ffmpeg output chunks."""
+        for i in range(len(chunk)):
+            char = chunk[i]
+            if char in b"\r\n":
+                line = self.newline()
+                if self.duration is None:
+                    self.duration = self.get_duration(line)
+                if self.dest is None:
+                    self.dest = self.get_dest(line)
+                if self.fps is None:
+                    self.fps = self.get_fps(line)
+                if not self.progress(line):
+                    self.print_log(line)
+            else:
+                self.line_acc.append(char)
+                if self.line_acc[-6:] == bytearray(b"[y/N] "):
+                    line = self.line_acc.decode(self.encoding, errors="replace")
+                    self.console.print(rich.text.Text.from_ansi(line), end="")
+                    self.console.file.flush()
+                    if stdin:
+                        stdin.put(input() + "\n")
+                    self.newline()
 
     def print_log(self, line: bytes, end="\n"):
         """Print a log line to the console, preserving ANSI colors."""
@@ -234,11 +234,11 @@ def main(
                 raise RuntimeError("ffmpeg stderr pipe is unavailable")
 
             while True:
-                out = stderr.read(1)
-                if out == b"" and p.poll() is not None:
+                chunk = stderr.read1(1024)
+                if not chunk and p.poll() is not None:
                     break
-                if out != b"":
-                    notifier(out)
+                if chunk:
+                    notifier(chunk)
             notifier.flush()
 
     except KeyboardInterrupt:
