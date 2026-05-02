@@ -219,6 +219,11 @@ def main(
     argv = argv or sys.argv[1:]
     console = console or rich.console.Console(file=stream, force_terminal=True)
 
+    def handle_sigterm(sig, frame):
+        raise SystemExit(sig + 128)
+
+    old_sigterm = signal.signal(signal.SIGTERM, handle_sigterm)
+
     p = None
     try:
         with ProgressNotifier(
@@ -246,11 +251,16 @@ def main(
         console.print("Received KeyboardInterrupt, exiting...")
         return signal.SIGINT + 128  # POSIX standard
 
+    except SystemExit as err:
+        console.print(f"Received signal {err.code - 128}, exiting...")
+        return err.code
+
     except Exception as err:
         console.print("Unexpected exception:", err)
         return 1
 
     finally:
+        signal.signal(signal.SIGTERM, old_sigterm)
         if p is not None and p.poll() is None:
             p.terminate()
             try:
