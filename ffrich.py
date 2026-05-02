@@ -219,6 +219,7 @@ def main(
     argv = argv or sys.argv[1:]
     console = console or rich.console.Console(file=stream, force_terminal=True)
 
+    p = None
     try:
         with ProgressNotifier(
             file=stream,
@@ -249,8 +250,16 @@ def main(
         console.print("Unexpected exception:", err)
         return 1
 
-    else:
-        return p.returncode
+    finally:
+        if p is not None and p.poll() is None:
+            p.terminate()
+            try:
+                p.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait()
+
+    return p.returncode
 
 
 
