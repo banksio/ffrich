@@ -219,6 +219,32 @@ def main(
     argv = argv or sys.argv[1:]
     console = console or rich.console.Console(file=stream, force_terminal=True)
 
+    # Flags that indicate ffmpeg is just printing information and won't
+    # produce progress output on stderr. These should be passed through
+    # directly to maintain perfect output ordering and parity.
+    INFO_FLAGS = {
+        "-L", "-h", "-help", "--help", "-version", "--version",
+        "-muxers", "-demuxers", "-devices", "-decoders", "-encoders",
+        "-bsfs", "-formats", "-protocols", "-filters", "-pix_fmts",
+        "-layouts", "-sample_fmts", "-colors", "-sources", "-sinks",
+        "-hwaccels", "-buildconf"
+    }
+    
+    # Check if any of the info flags are present
+    is_info = not argv
+    for arg in argv:
+        if arg in INFO_FLAGS or arg.startswith("-h"):
+            is_info = True
+            break
+            
+    if is_info:
+        env = os.environ.copy()
+        env["AV_LOG_FORCE_COLOR"] = "1"
+        try:
+            return subprocess.call(["ffmpeg"] + argv, env=env)
+        except KeyboardInterrupt:
+            return 130
+
     def handle_sigterm(sig, frame):
         raise SystemExit(sig + 128)
 
@@ -249,7 +275,7 @@ def main(
 
     except KeyboardInterrupt:
         console.print("Received KeyboardInterrupt, exiting...")
-        return signal.SIGINT + 128  # POSIX standard
+        return 130
 
     except SystemExit as err:
         console.print(f"Received signal {err.code - 128}, exiting...")
