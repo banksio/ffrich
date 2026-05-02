@@ -40,19 +40,24 @@ import rich.text
 
 
 class FramesPerSecondColumn(rich.progress.ProgressColumn):
-    """Renders file size downloaded and total, e.g. '0.5/2.3 GB'.
-
-    Args:
-        binary_units (bool, optional): Use binary units, KiB, MiB etc. Defaults to False.
-    """
+    """Render the current ffmpeg frame rate in a rich progress bar."""
 
     def __init__(
-        self, binary_units: bool = False, table_column: Optional[rich.table.Column] = None
+        self,
+        binary_units: bool = False,
+        table_column: Optional[rich.table.Column] = None,
     ) -> None:
+        """Initialize the FPS column.
+
+        Args:
+            binary_units: Use binary units for sizing, if supported.
+            table_column: Optional parent table column for rich.
+        """
         self.binary_units = binary_units
         super().__init__(table_column=table_column)
 
     def render(self, task: rich.progress.Task) -> rich.text.Text:
+        """Render a formatted frames-per-second value."""
         speed = task.finished_speed or task.speed
         if speed is None:
             return rich.text.Text("- fps", style="green")
@@ -60,6 +65,7 @@ class FramesPerSecondColumn(rich.progress.ProgressColumn):
 
 
 class ProgressNotifier(object):
+    """Track ffmpeg progress output and render a rich progress bar."""
 
     _DURATION_RX = re.compile(rb"Duration: (\d{2}):(\d{2}):(\d{2})\.\d{2}")
     _PROGRESS_RX = re.compile(rb"time=(\d{2}):(\d{2}):(\d{2})\.\d{2}")
@@ -68,16 +74,31 @@ class ProgressNotifier(object):
 
     @staticmethod
     def _seconds(hours, minutes, seconds):
+        """Convert an hours/minutes/seconds tuple into total seconds."""
         return (int(hours) * 60 + int(minutes)) * 60 + int(seconds)
 
     def __enter__(self):
+        """Enter the progress notifier context."""
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
+        """Stop the progress bar when exiting the context."""
         if self.pbar is not None:
             self.pbar.stop()
 
-    def __init__(self, file=None, encoding=None, console = rich.console.Console(stderr=True)):
+    def __init__(
+        self,
+        file=None,
+        encoding=None,
+        console: Optional[rich.console.Console] = None,
+    ):
+        """Initialize a new ProgressNotifier.
+
+        Args:
+            file: Stream to print prompts and ffmpeg output to.
+            encoding: Encoding used to decode ffmpeg output.
+            console: Rich console used for progress rendering.
+        """
         self.lines = []
         self.line_acc = bytearray()
         self.duration = None
@@ -88,9 +109,10 @@ class ProgressNotifier(object):
         self.fps = None
         self.file = file or sys.stderr
         self.encoding = encoding or locale.getpreferredencoding() or 'UTF-8'
-        self.console = console
+        self.console = console or rich.console.Console(stderr=True)
 
-    def __call__(self, char, stdin = None):
+    def __call__(self, char, stdin=None):
+        """Process ffmpeg output one character at a time."""
         if isinstance(char, str):
             char = char.encode('ascii')
         if char in b"\r\n":
@@ -112,39 +134,41 @@ class ProgressNotifier(object):
                 self.newline()
 
     def newline(self):
+        """Finalize the current line of ffmpeg output."""
         line = bytes(self.line_acc)
         self.lines.append(line)
         self.line_acc = bytearray()
         return line
 
     def get_fps(self, line):
+        """Parse the current frame rate from an ffmpeg output line."""
         search = self._FPS_RX.search(line)
         if search is not None:
             return round(float(search.group(1)))
         return None
 
     def get_duration(self, line):
+        """Parse the total duration from an ffmpeg output line."""
         search = self._DURATION_RX.search(line)
         if search is not None:
             return self._seconds(*search.groups())
         return None
 
     def get_dest(self, line):
+        """Parse the destination filename from an ffmpeg output line."""
         search = self._DEST_RX.search(line)
         if search is not None:
             return os.path.basename(search.group(1).decode(self.encoding))
         return None
 
     def progress(self, line):
+        """Update the progress bar using the latest ffmpeg time output."""
         search = self._PROGRESS_RX.search(line)
         if search is not None:
-
             total = self.duration
             current = self._seconds(*search.groups())
-            unit = " seconds"
 
             if self.fps is not None:
-                unit = " frames"
                 current *= self.fps
                 if total:
                     total *= self.fps
@@ -158,26 +182,43 @@ class ProgressNotifier(object):
                     rich.progress.TextColumn("{task.completed}/{task.total}"),
                     FramesPerSecondColumn(),
                     rich.progress.TimeRemainingColumn(),
-                    console=self.console
+                    console=self.console,
                 )
-                self.pbar_task = self.pbar.add_task(description=self.dest, total=total)
+                self.pbar_task = self.pbar.add_task(
+                    description=self.dest or "",
+                    total=total,
+                )
                 self.pbar.start()
 
-            self.pbar.update(self.pbar_task, completed=current)
+            pbar_task = self.pbar_task
+            assert pbar_task is not None
+            self.pbar.update(pbar_task, completed=current)
 
-def main(argv=None, stream=sys.stderr, encoding=None, console=rich.console.Console(stderr=True)):
+def main(
+    argv=None,
+    stream=sys.stderr,
+    encoding=None,
+    console: Optional[rich.console.Console] = None,
+):
+    """Run ffmpeg with a rich progress bar for stderr output."""
     argv = argv or sys.argv[1:]
-    console = rich.console.Console(file=stream)
+    console = console or rich.console.Console(file=stream)
 
     try:
-        with ProgressNotifier(file=stream, encoding=encoding, console=console) as notifier:
-
+        with ProgressNotifier(
+            file=stream,
+            encoding=encoding,
+            console=console,
+        ) as notifier:
             cmd = ["ffmpeg"] + argv
             p = subprocess.Popen(cmd, stderr=subprocess.PIPE)
+            stderr = p.stderr
+            if stderr is None:
+                raise RuntimeError("ffmpeg stderr pipe is unavailable")
 
             while True:
-                out = p.stderr.read(1)
-                if out == b"" and p.poll() != None:
+                out = stderr.read(1)
+                if out == b"" and p.poll() is not None:
                     break
                 if out != b"":
                     notifier(out)
