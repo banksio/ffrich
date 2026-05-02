@@ -99,7 +99,6 @@ class ProgressNotifier(object):
             encoding: Encoding used to decode ffmpeg output.
             console: Rich console used for progress rendering.
         """
-        self.lines = []
         self.line_acc = bytearray()
         self.duration = None
         self.dest = None
@@ -123,20 +122,26 @@ class ProgressNotifier(object):
                 self.dest = self.get_dest(line)
             if self.fps is None:
                 self.fps = self.get_fps(line)
-            self.progress(line)
+            if not self.progress(line):
+                self.print_log(line)
         else:
             self.line_acc.extend(char)
             if self.line_acc[-6:] == bytearray(b"[y/N] "):
-                print(self.line_acc.decode(self.encoding), end="", file=self.file)
-                self.file.flush()
+                line = self.line_acc.decode(self.encoding, errors="replace")
+                self.console.print(rich.text.Text.from_ansi(line), end="")
+                self.console.file.flush()
                 if stdin:
                     stdin.put(input() + "\n")
                 self.newline()
 
+    def print_log(self, line: bytes, end="\n"):
+        """Print a log line to the console, preserving ANSI colors."""
+        decoded = line.decode(self.encoding, errors="replace")
+        self.console.print(rich.text.Text.from_ansi(decoded), end=end, soft_wrap=True)
+
     def newline(self):
         """Finalize the current line of ffmpeg output."""
         line = bytes(self.line_acc)
-        self.lines.append(line)
         self.line_acc = bytearray()
         return line
 
@@ -193,6 +198,16 @@ class ProgressNotifier(object):
             pbar_task = self.pbar_task
             assert pbar_task is not None
             self.pbar.update(pbar_task, completed=current)
+            return True
+        return False
+
+    def flush(self):
+        """Finalize and print any remaining output."""
+        if self.line_acc:
+            line = self.newline()
+            if not self.progress(line):
+                self.print_log(line, end="")
+
 
 def main(
     argv=None,
@@ -202,7 +217,7 @@ def main(
 ):
     """Run ffmpeg with a rich progress bar for stderr output."""
     argv = argv or sys.argv[1:]
-    console = console or rich.console.Console(file=stream)
+    console = console or rich.console.Console(file=stream, force_terminal=True)
 
     try:
         with ProgressNotifier(
@@ -211,7 +226,9 @@ def main(
             console=console,
         ) as notifier:
             cmd = ["ffmpeg"] + argv
-            p = subprocess.Popen(cmd, stderr=subprocess.PIPE)
+            env = os.environ.copy()
+            env["AV_LOG_FORCE_COLOR"] = "1"
+            p = subprocess.Popen(cmd, stderr=subprocess.PIPE, env=env)
             stderr = p.stderr
             if stderr is None:
                 raise RuntimeError("ffmpeg stderr pipe is unavailable")
@@ -222,6 +239,7 @@ def main(
                     break
                 if out != b"":
                     notifier(out)
+            notifier.flush()
 
     except KeyboardInterrupt:
         console.print("Received KeyboardInterrupt, exiting...")
@@ -232,9 +250,8 @@ def main(
         return 1
 
     else:
-        if p.returncode != 0:
-            print(notifier.lines[-1].decode(notifier.encoding), file=stream)
         return p.returncode
+
 
 
 if __name__ == "__main__":
